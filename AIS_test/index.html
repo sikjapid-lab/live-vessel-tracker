@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ردیاب زنده شناورها</title>
+    <!-- استایل نقشه Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; font-family: Tahoma, sans-serif; }
+        #map { height: 100vh; width: 100vw; }
+        .info-box {
+            position: absolute; top: 10px; right: 10px; z-index: 1000;
+            background: rgba(255, 255, 255, 0.9); padding: 12px 20px;
+            border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="info-box">
+        <h3>🚢 ردیاب زنده شناورها</h3>
+        <p>وضعیت: <span id="status" style="color: green;">در حال بروزرسانی...</span></p>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- اسکریپت نقشه Leaflet -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // ۱. ایجاد نقشه (مرکز اولیه: اروپا/تنگه مانش)
+        const map = L.map('map').setView([51.5, 3.2], 8);
+
+        // ۲. بارگذاری لایه نقشه رایگان OpenStreetMap
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // لایه نگهداری مارکرهای کشتی‌ها
+        const shipsLayer = L.layerGroup().addTo(map);
+
+        // ۳. تابع دریافت اطلاعات از API OpenShipData
+        async function fetchShipsData() {
+            // محدوده مختصات جغرافیایی (Bounding Box) برای دریافت موقعیت شناورها
+            // فرمول: SW_Lat,SW_Lon;NE_Lat,NE_Lon
+            const area = "50.0,2.0;53.0,6.0"; 
+            const url = `https://ais.marineplan.com/location/2/locations.json?area=${area}&maxage=1800&source=ANY`;
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error("مشکل در دریافت داده‌ها");
+                
+                const data = await response.json();
+                
+                // پاک کردن مارکرهای قبلی
+                shipsLayer.clearLayers();
+
+                // افزودن کشتی‌های جدید روی نقشه
+                if (data && Array.isArray(data)) {
+                    data.forEach(ship => {
+                        if (ship.latitude && ship.longitude) {
+                            const marker = L.marker([ship.latitude, ship.longitude]);
+                            
+                            // اطلاعات پاپ‌آپ هنگام کلیک روی کشتی
+                            const popupContent = `
+                                <b>نام شناور:</b> ${ship.name || 'نامشخص'}<br>
+                                <b>شناسه (MMSI):</b> ${ship.mmsi || 'N/A'}<br>
+                                <b>سرعت:</b> ${ship.speed ? ship.speed + ' km/h' : '0'}<br>
+                                <b>زاویه حرکت:</b> ${ship.bearing || 0}°
+                            `;
+                            marker.bindPopup(popupContent);
+                            shipsLayer.addLayer(marker);
+                        }
+                    });
+                    document.getElementById('status').innerText = `بروزرسانی شد (${data.length} شناور)`;
+                }
+            } catch (error) {
+                console.error("خطا:", error);
+                document.getElementById('status').innerText = "خطا در اتصال";
+                document.getElementById('status').style.color = "red";
+            }
+        }
+
+        // دریافت اولیه داده‌ها
+        fetchShipsData();
+
+        // ۴. بروزرسانی خودکار هر ۶۰ ثانیه یک‌بار (۲۴ ساعته)
+        setInterval(fetchShipsData, 60000);
+    </script>
+</body>
+</html>
