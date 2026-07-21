@@ -3,45 +3,155 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ردیاب زنده شناورها (معماری Vercel Edge)</title>
+    <title>سامانه ردیابی زنده شناورها</title>
+    
+    <!-- استایل‌های Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; font-family: Tahoma, sans-serif; }
-        #map { height: 100vh; width: 100vw; }
+        * {
+            box-sizing: border-box;
+        }
+        body, html { 
+            margin: 0; 
+            padding: 0; 
+            height: 100%; 
+            width: 100%;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            overflow: hidden;
+        }
+        #map { 
+            height: 100vh; 
+            width: 100vw; 
+        }
         .info-box {
-            position: absolute; top: 10px; right: 10px; z-index: 1000;
-            background: rgba(255, 255, 255, 0.95); padding: 12px 20px;
-            border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            direction: rtl; text-align: right;
+            position: absolute; 
+            top: 15px; 
+            right: 15px; 
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.92); 
+            backdrop-filter: blur(8px);
+            padding: 14px 20px;
+            border-radius: 12px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            direction: rtl; 
+            text-align: right;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            min-width: 220px;
+        }
+        .info-box h3 {
+            margin: 0 0 6px 0;
+            font-size: 16px;
+            color: #1e293b;
+        }
+        .info-box p {
+            margin: 0;
+            font-size: 13px;
+            color: #64748b;
+        }
+        .status-badge {
+            font-weight: bold;
+        }
+        /* استایل آیکون‌های شناور */
+        .vessel-icon {
+            background: none;
+            border: none;
+        }
+        /* تنظیم موقعیت پنل کنترل لایه‌ها */
+        .leaflet-top.leaflet-left {
+            top: 10px;
+            left: 10px;
         }
     </style>
 </head>
 <body>
 
     <div class="info-box">
-        <h3 style="margin: 0 0 8px 0;">🚢 ردیاب زنده شناورها</h3>
-        <p style="margin: 0;">وضعیت: <span id="status" style="color: blue;">در حال دریافت از Vercel...</span></p>
+        <h3>🚢 ردیاب زنده شناورها</h3>
+        <p>وضعیت: <span id="status" class="status-badge" style="color: #2563eb;">در حال دریافت...</span></p>
     </div>
 
     <div id="map"></div>
 
+    <!-- اسکریپت اصلی Leaflet -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <script>
-        const map = L.map('map').setView([52.0, 5.0], 6);
+        // ۱. آدرس اختصاصی Backend Serverless در Vercel
+        const VERCEL_API_URL = "https://live-vessel-tracker.vercel.app/api/vessels";
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        // ۲. تعریف بیس‌مپ‌های متنوع (Base Layers)
+        const osmStandard = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
             attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+        });
 
+        const esriSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 18,
+            attribution: 'Tiles © Esri'
+        });
+
+        const cartoDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap & CARTO'
+        });
+
+        const opentopoMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            maxZoom: 17,
+            attribution: 'Map data: © OpenStreetMap, SRTM'
+        });
+
+        // لایه کمکی علائم دریانوردی
+        const openSeaMap = L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+            maxZoom: 18,
+            attribution: 'Map data: © OpenSeaMap'
+        });
+
+        // ۳. مقداردهی اولیه نقشه
+        const map = L.map('map', {
+            center: [52.0, 5.0],
+            zoom: 6,
+            layers: [osmStandard]
+        });
+
+        // لایه ذخیره و مدیریت مارکرهای شناورها
         const shipsLayer = L.layerGroup().addTo(map);
 
-        // ⚠️ آدرس Function منتشرشده در Vercel را اینجا وارد کنید
-        const VERCEL_API_URL = "https://my-ais-backend.vercel.app/api/vessels";
+        // ۴. پنل مدیریت بیس‌مپ‌ها و لایه‌ها
+        const baseMaps = {
+            "🗺️ نقشه استاندارد (OSM)": osmStandard,
+            "🛰️ تصویر ماهواره‌ای (Esri)": esriSatellite,
+            "🌙 حالت تاریک (Carto Dark)": cartoDark,
+            "⛰️ توپوگرافی (OpenTopo)": opentopoMap
+        };
 
+        const overlayMaps = {
+            "🚢 شناورهای زنده": shipsLayer,
+            "⚓ علائم دریانوردی (OpenSeaMap)": openSeaMap
+        };
+
+        L.control.layers(baseMaps, overlayMaps, { position: 'topleft', collapsed: false }).addTo(map);
+
+        // ۵. ساخت آیکون SVG جهت‌دار شناورها
+        function createShipIcon(heading = 0) {
+            const svgIcon = `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="26" height="26" style="transform: rotate(${heading}deg); transform-origin: center;">
+                    <path fill="#2563eb" stroke="#ffffff" stroke-width="1.5" d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/>
+                </svg>`;
+            return L.divIcon({
+                html: svgIcon,
+                className: 'vessel-icon',
+                iconSize: [26, 26],
+                iconAnchor: [13, 13]
+            });
+        }
+
+        // ۶. تابع دریافت و چرخه به‌روزرسانی اطلاعات شناورها
         async function fetchShipsData() {
+            const statusEl = document.getElementById('status');
             try {
                 const response = await fetch(VERCEL_API_URL);
-                if (!response.ok) throw new Error("خطا در پاسخ Vercel");
+                if (!response.ok) throw new Error("پاسخ نا معتبر از سرور");
 
                 const data = await response.json();
                 shipsLayer.clearLayers();
@@ -53,29 +163,41 @@
                         const lon = ship.lon || ship.lng || ship.longitude;
 
                         if (lat && lon) {
-                            const marker = L.marker([lat, lon]);
-                            marker.bindPopup(`
-                                <b>نام شناور:</b> ${ship.name || 'نامشخص'}<br>
-                                <b>MMSI:</b> ${ship.mmsi || 'N/A'}<br>
-                                <b>سرعت:</b> ${ship.speed || 0} گره دریایی
-                            `);
+                            const heading = ship.heading || ship.bearing || 0;
+                            const marker = L.marker([lat, lon], {
+                                icon: createShipIcon(heading)
+                            });
+
+                            const popupContent = `
+                                <div style="direction: rtl; text-align: right; font-family: Tahoma, sans-serif; font-size: 12px; line-height: 1.6;">
+                                    <h4 style="margin: 0 0 6px 0; color: #2563eb; font-size: 14px;">🚢 ${ship.name || 'شناور نامشخص'}</h4>
+                                    <hr style="margin: 4px 0; border: 0; border-top: 1px solid #e2e8f0;">
+                                    <b>شناسه (MMSI):</b> ${ship.mmsi || 'N/A'}<br>
+                                    <b>سرعت:</b> ${ship.speed || 0} گره دریایی<br>
+                                    <b>زاویه حرکت:</b> ${heading}°<br>
+                                    <b>موقعیت:</b> ${lat.toFixed(4)}, ${lon.toFixed(4)}
+                                </div>
+                            `;
+
+                            marker.bindPopup(popupContent);
                             shipsLayer.addLayer(marker);
                             count++;
                         }
                     });
 
-                    document.getElementById('status').innerText = `متصل به Vercel (${count} شناور)`;
-                    document.getElementById('status').style.color = "green";
+                    statusEl.innerText = `متصل (${count} شناور آنلاین)`;
+                    statusEl.style.color = "#16a34a";
                 }
             } catch (error) {
-                console.error("Error:", error);
-                document.getElementById('status').innerText = "خطا در ارتباط با سرور Vercel";
-                document.getElementById('status').style.color = "red";
+                console.error("Fetch Error:", error);
+                statusEl.innerText = "خطا در اتصال به Vercel";
+                statusEl.style.color = "#dc2626";
             }
         }
 
+        // اجرای اولیه و فراخوانی خودکار هر ۳۰ ثانیه یک بار
         fetchShipsData();
-        setInterval(fetchShipsData, 30000); // بروزرسانی هر ۳۰ ثانیه
+        setInterval(fetchShipsData, 30000);
     </script>
 </body>
 </html>
