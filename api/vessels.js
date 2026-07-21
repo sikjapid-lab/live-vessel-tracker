@@ -1,40 +1,61 @@
 export default async function handler(req, res) {
-  // ۱. تنظیم هدرهای CORS برای اجازه دادن به GitHub Pages
+  // ۱. تنظیم هدرهای CORS برای دسترسی کامل
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
   res.setHeader(
     'Access-Control-Allow-Headers',
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
   );
 
-  // در صورت ارسال درخواست OPTIONS از مرورگر
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
   }
 
   try {
-    // ۲. دریافت داده از فیدهای زنده
-    const response = await fetch("https://barentswatch.no/bwapi/v2/geodata/ais/openpositions?Xmin=2.0&Xmax=10.0&Ymin=50.0&Ymax=60.0", {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
+    // ۲. دریافت داده واقعی و زنده هزاران شناور از API رایگان و عمومی DigiTraffic
+    const response = await fetch("https://mrt-api.digitraffic.fi/api/v1/vessels", {
+      headers: {
+        'Digitraffic-User': 'LiveVesselTracker/1.0',
+        'Accept-Encoding': 'gzip'
+      }
     });
 
     if (!response.ok) {
-      throw new Error("تأمین‌کننده پاسخ نداد");
+      throw new Error(`DigiTraffic HTTP Error: ${response.status}`);
     }
 
-    const data = await response.json();
-    return res.status(200).json(data);
+    const rawData = await response.json();
+    
+    // ۳. مپ کردن ساختار داده‌ها به ساختاری که فرانت‌اند شما می‌شناسد
+    const vessels = [];
+    
+    if (Array.isArray(rawData)) {
+      rawData.forEach(item => {
+        // چک کردن وجود مختصات مکانی
+        if (item.location && item.location.coordinates) {
+          const lon = item.location.coordinates[0];
+          const lat = item.location.coordinates[1];
+          
+          vessels.push({
+            name: item.name || `Vessel ${item.mmsi}`,
+            mmsi: item.mmsi,
+            lat: lat,
+            lon: lon,
+            speed: item.sog || 0, // Speed Over Ground
+            heading: item.cog || item.heading || 0 // Course Over Ground
+          });
+        }
+      });
+    }
+
+    // ارسال داده‌های واقعی شناورها به فرانت‌اند
+    return res.status(200).json(vessels);
 
   } catch (error) {
-    // ۳. داده‌های پشتیبان دینامیک در صورت افت منبع اصلی
-    const backupData = [
-      { name: "IRAN SHAHR", mmsi: 422010100, lat: 51.92, lon: 4.47, speed: 12.4 },
-      { name: "PERSIAN GULF", mmsi: 422020200, lat: 52.37, lon: 4.89, speed: 0.2 },
-      { name: "CASPIAN VOYAGER", mmsi: 422030300, lat: 53.55, lon: 9.99, speed: 18.1 },
-      { name: "OCEAN CARRIER", mmsi: 211234000, lat: 50.85, lon: 1.35, speed: 14.0 }
-    ];
-    return res.status(200).json(backupData);
+    console.error("API Error:", error);
+    // داده‌های fallback فقط در صورت قطع کامل اینترنت یا سرور
+    return res.status(500).json({ error: "Failed to fetch live AIS stream" });
   }
 }
